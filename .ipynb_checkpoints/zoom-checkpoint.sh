@@ -7,8 +7,6 @@ FILENAME="$2"
 MAX_EPOCHS=$3
 
 LR=0.1
-W=736
-H=414
 OPTIMISER=Adam
 MAX_ITERATIONS=25
 SEED=`shuf -i 1-9999999999 -n 1` # Keep the same seed each epoch for more deterministic runs
@@ -18,8 +16,8 @@ FILENAME_NO_EXT=${FILENAME%.*}
 FILE_EXTENSION=${FILENAME##*.}
 
 # Initial run
-#python generate.py -s $W $H -p="$TEXT" -opt="$OPTIMISER" -lr=$LR -i=$MAX_ITERATIONS -se=$MAX_ITERATIONS --seed=$SEED -o="$FILENAME"
-cp "$FILENAME" steps/"$FILENAME_NO_EXT"-0000."$FILE_EXTENSION"
+python generate.py -p="$TEXT" -opt="$OPTIMISER" -lr=$LR -i=$MAX_ITERATIONS -se=$MAX_ITERATIONS --seed=$SEED -o="$FILENAME"
+cp "$FILENAME" "$FILENAME_NO_EXT"-0000."$FILE_EXTENSION"
 convert "$FILENAME" -distort SRT 1.01,0 -gravity center "$FILENAME"	# Zoom
 convert "$FILENAME" -distort SRT 1 -gravity center "$FILENAME"	# Rotate
 
@@ -27,8 +25,8 @@ convert "$FILENAME" -distort SRT 1 -gravity center "$FILENAME"	# Rotate
 for (( i=1; i<=$MAX_EPOCHS; i++ ))
 do
   padded_count=$(printf "%04d" "$i")  
-  python generate.py -s $W $H -p="$TEXT" -opt="$OPTIMISER" -lr=$LR -i=$MAX_ITERATIONS -se=$MAX_ITERATIONS --seed=$SEED -ii="$FILENAME" -o="$FILENAME"
-  cp "$FILENAME" steps/"$FILENAME_NO_EXT"-"$padded_count"."$FILE_EXTENSION" 
+  python generate.py -p="$TEXT" -opt="$OPTIMISER" -lr=$LR -i=$MAX_ITERATIONS -se=$MAX_ITERATIONS --seed=$SEED -ii="$FILENAME" -o="$FILENAME"
+  cp "$FILENAME" "$FILENAME_NO_EXT"-"$padded_count"."$FILE_EXTENSION"    
   convert "$FILENAME" -distort SRT 1.01,0 -gravity center "$FILENAME" # Zoom
   convert "$FILENAME" -distort SRT 1 -gravity center "$FILENAME"	# Rotate
 done

@@ -9,8 +9,6 @@ from urllib.request import urlopen
 from tqdm import tqdm
 import sys
 import os
-import ssl
-ssl._create_default_https_context = ssl._create_unverified_context
 
 # pip install taming-transformers doesn't work with Gumbel, but does not yet work with coco etc
 # appending the path does work with Gumbel, but gives ModuleNotFoundError: No module named 'transformers' for coco etc
@@ -80,14 +78,9 @@ vq_parser.add_argument("-opt",  "--optimiser", type=str, help="Optimiser", choic
 vq_parser.add_argument("-o",    "--output", type=str, help="Output image filename", default="output.png", dest='output')
 vq_parser.add_argument("-vid",  "--video", action='store_true', help="Create video frames?", dest='make_video')
 vq_parser.add_argument("-zvid", "--zoom_video", action='store_true', help="Create zoom video?", dest='make_zoom_video')
-vq_parser.add_argument("-ft",    "--first_transform", type=str, help="Output image filename", default="")
-vq_parser.add_argument("-at", "--auto_transform", default=False, action="store_true", help="enable auto transform")
-vq_parser.add_argument("-atf", "--auto_transform_frequency", type=int, default=1000, help="enable auto transform")
-vq_parser.add_argument("-atts", "--auto_transforms", type=str, default="", help="enable auto transform")
 vq_parser.add_argument("-zs",   "--zoom_start", type=int, help="Zoom start iteration", default=0, dest='zoom_start')
 vq_parser.add_argument("-zse",  "--zoom_save_every", type=int, help="Save zoom image iterations", default=10, dest='zoom_frequency')
 vq_parser.add_argument("-zsc",  "--zoom_scale", type=float, help="Zoom scale %%", default=0.99, dest='zoom_scale')
-vq_parser.add_argument("-zr",  "--zoom_rotate", type=float, help="Zoom rotate %%", default=0, dest='zoom_rotate')
 vq_parser.add_argument("-zsx",  "--zoom_shift_x", type=int, help="Zoom shift x (left/right) amount in pixels", default=0, dest='zoom_shift_x')
 vq_parser.add_argument("-zsy",  "--zoom_shift_y", type=int, help="Zoom shift y (up/down) amount in pixels", default=0, dest='zoom_shift_y')
 vq_parser.add_argument("-cpe",  "--change_prompt_every", type=int, help="Prompt change frequency", default=0, dest='prompt_frequency')
@@ -195,9 +188,6 @@ def zoom_at(img, x, y, zoom):
     img = img.crop((x - w / zoom2, y - h / zoom2, 
                     x + w / zoom2, y + h / zoom2))
     return img.resize((w, h), Image.LANCZOS)
-
-def rotate(img, rotate_deg):
-    return img.rotate(rotate_deg)
 
 
 # NR: Testing with different intital images
@@ -723,7 +713,7 @@ def checkin(i, losses):
     out = synth(z)
     info = PngImagePlugin.PngInfo()
     info.add_text('comment', f'{args.prompts}')
-    TF.to_pil_image(out[0].cpu()).save(f"steps-checkin/{round(i / args.display_freq)}.png", pnginfo=info)
+    TF.to_pil_image(out[0].cpu()).save(args.output, pnginfo=info) 	
 
 
 def ascend_txt():
@@ -778,12 +768,6 @@ this_video_frame = 0 # for video styling
 # Do it
 try:
     with tqdm() as pbar:
-        transform_options = ["zoom_rotate", "translate", "zoom"]
-        cur_options = transform_options.copy()
-        cur_transform = "translate"
-        cur_translate_x = 0
-        cur_translate_y = 0
-        cur_rotate = 0
         while True:            
             # Change generated image
             if args.make_zoom_video:
@@ -794,24 +778,9 @@ try:
                     img = np.array(out.mul(255).clamp(0, 255)[0].cpu().detach().numpy().astype(np.uint8))[:,:,:]
                     img = np.transpose(img, (1, 2, 0))
                     imageio.imwrite('./steps/' + str(j) + '.png', np.array(img))
-                    
-                    if args.auto_transform and i % args.auto_transform_frequency == 0:
-                        if args.auto_transforms:
-                            ats = args.auto_transforms.split(",")
-                            cur_transform = ats[i % len(ats)]
-                        else:
-                            if len(cur_options) == 0:
-                                cur_options = transform_options.copy()
-                            next_t = cur_options[random.randint(0, len(cur_options) - 1)]
-                            cur_options.remove(next_t)
-                            cur_transform = next_t
-                        cur_rotate = random.uniform(.6, 2) * random.choice([-1, 1])
-                        cur_translate_x = random.randint(2, 7) * random.choice([-1, 1])
-                        cur_translate_y = random.randint(2, 6) * random.choice([-1, 1])
-                        print(f"Type {cur_transform}. Rotate {cur_rotate}. X: {cur_translate_x}. Y: {cur_translate_y}")
 
                     # Time to start zooming?                    
-                    if not args.auto_transform:
+                    if args.zoom_start <= i:
                         # Convert z back into a Pil image                    
                         #pil_image = TF.to_pil_image(out[0].cpu())
                         
@@ -839,29 +808,6 @@ try:
 
                         # Re-create optimiser
                         opt = get_opt(args.optimiser, args.step_size)
-                    else: # Auto transform
-                        # Convert NP to Pil image
-                        pil_image_zoom = Image.fromarray(np.array(img).astype('uint8'), 'RGB')
-                        
-                        if cur_transform == "zoom":
-                            pil_image_zoom = zoom_at(pil_image_zoom, sideX/2, sideY/2, args.zoom_scale)
-                        elif cur_transform == "zoom_rotate":
-                            pil_image_zoom = rotate(pil_image_zoom, cur_rotate)
-                            pil_image_zoom = zoom_at(pil_image_zoom, sideX/2, sideY/2, args.zoom_scale)
-                        elif cur_transform == "translate":
-                            pil_image_zoom = ImageChops.offset(pil_image_zoom, cur_translate_x, cur_translate_y)
-                        
-                        # Convert image back to a tensor again
-                        pil_tensor = TF.to_tensor(pil_image_zoom)
-                        
-                        # Re-encode
-                        z, *_ = model.encode(pil_tensor.to(device).unsqueeze(0) * 2 - 1)
-                        z_orig = z.clone()
-                        z.requires_grad_(True)
-
-                        # Re-create optimiser
-                        opt = get_opt(args.optimiser, args.step_size)
-                        
                     
                     # Next
                     j += 1
